@@ -1,21 +1,21 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Neon Rider Terrain Pack</title>
+<title>Neon Rider</title>
 
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 
 <style>
 html,body{
-margin:0;
-padding:0;
-overflow:hidden;
-background:black;
+    margin:0;
+    padding:0;
+    overflow:hidden;
+    background:#000;
 }
 canvas{
-display:block;
+    display:block;
 }
 </style>
 </head>
@@ -23,19 +23,25 @@ display:block;
 
 <script>
 
+let player;
+let scoreText;
+let score = 0;
+let touching = false;
+let terrain = [];
+let nextTerrainX = 0;
+
 const config = {
     type: Phaser.AUTO,
     width: window.innerWidth,
     height: window.innerHeight,
-
+    backgroundColor:"#000000",
     physics:{
-        default:'matter',
-        matter:{
-            gravity:{y:1},
+        default:"arcade",
+        arcade:{
+            gravity:{ y:1000 },
             debug:false
         }
     },
-
     scene:{
         create:create,
         update:update
@@ -44,275 +50,126 @@ const config = {
 
 new Phaser.Game(config);
 
-let bike;
-let wheel1;
-let wheel2;
-
-let bikeG;
-let wheelG1;
-let wheelG2;
-
-let scoreText;
-
-let accelerating=false;
-
-let terrain=[];
-let nextTerrainX=0;
-
-let particles=[];
-
 function create()
 {
-    this.matter.world.setBounds(
-        -1000,
-        -1000,
-        500000,
-        5000
-    );
+    const scene = this;
 
-    createTerrain(this);
-
-    bike =
-        this.matter.add.rectangle(
-            300,
-            300,
-            120,
-            30
-        );
-
-    wheel1 =
-        this.matter.add.circle(
-            250,
-            350,
-            25
-        );
-
-    wheel2 =
-        this.matter.add.circle(
-            350,
-            350,
-            25
-        );
-
-    this.matter.add.constraint(
-        bike,
-        wheel1,
-        70,
-        0.9
-    );
-
-    this.matter.add.constraint(
-        bike,
-        wheel2,
-        70,
-        0.9
-    );
-
-    bikeG =
-        this.add.rectangle(
-            0,
-            0,
-            120,
-            30,
-            0xffffff
-        );
-
-    wheelG1 =
-        this.add.circle(
-            0,
-            0,
-            25,
-            0x00ffff
-        );
-
-    wheelG2 =
-        this.add.circle(
-            0,
-            0,
-            25,
-            0x00ffff
-        );
-
-    bikeG.setStrokeStyle(4,0xff00ff);
-    wheelG1.setStrokeStyle(4,0xff00ff);
-    wheelG2.setStrokeStyle(4,0xff00ff);
-
-    scoreText =
-        this.add.text(
-            20,
-            20,
-            "Score: 0",
-            {
-                fontSize:"32px",
-                color:"#00ffff"
-            }
-        );
-
-    scoreText.setScrollFactor(0);
-
-    this.cameras.main.startFollow(
-        bikeG,
-        true,
-        0.05,
-        0.05
-    );
-
-    this.input.on(
-        "pointerdown",
-        ()=>accelerating=true
-    );
-
-    this.input.on(
-        "pointerup",
-        ()=>accelerating=false
-    );
-}
-
-function createTerrain(scene)
-{
-    for(let i=0;i<30;i++)
+    // Terrain
+    for(let i=0;i<25;i++)
     {
         spawnTerrain(scene);
     }
+
+    // Player bike (simple rectangle)
+    player = this.add.rectangle(
+        200,
+        300,
+        80,
+        30,
+        0xffffff
+    );
+
+    this.physics.add.existing(player);
+
+    player.body.setCollideWorldBounds(false);
+
+    terrain.forEach(t =>
+    {
+        this.physics.add.collider(player,t);
+    });
+
+    scoreText = this.add.text(
+        20,
+        20,
+        "Score: 0",
+        {
+            fontSize:"28px",
+            color:"#00ffff"
+        }
+    );
+
+    scoreText.setScrollFactor(0);
+
+    this.input.on("pointerdown",()=>{
+        touching = true;
+    });
+
+    this.input.on("pointerup",()=>{
+        touching = false;
+    });
+
+    this.cameras.main.startFollow(player,true,0.08,0.08);
 }
 
 function spawnTerrain(scene)
 {
-    const width=
-        Phaser.Math.Between(
-            250,
-            500
-        );
+    const width =
+        Phaser.Math.Between(250,450);
 
-    const angle=
-        Phaser.Math.Between(
-            -25,
-            25
-        );
+    const height = 40;
 
-    const y=
-        Phaser.Math.Between(
-            700,
-            900
-        );
+    const y =
+        Phaser.Math.Between(600,800);
 
-    const block=
-        scene.matter.add.rectangle(
-            nextTerrainX,
-            y,
-            width,
-            40,
-            {
-                isStatic:true,
-                angle:angle
-            }
-        );
+    const angle =
+        Phaser.Math.Between(-20,20);
 
-    terrain.push(block);
-
-    const visual=
+    const block =
         scene.add.rectangle(
             nextTerrainX,
             y,
             width,
-            40,
+            height,
             0x111111
         );
 
-    visual.rotation=
-        Phaser.Math.DegToRad(
-            angle
-        );
-
-    visual.setStrokeStyle(
+    block.setStrokeStyle(
         4,
         0x00ffff
     );
 
-    terrain.push(visual);
+    scene.physics.add.existing(
+        block,
+        true
+    );
 
-    nextTerrainX+=width;
+    block.angle = angle;
+
+    terrain.push(block);
+
+    nextTerrainX += width;
 }
 
 function update()
 {
-    if(accelerating)
+    if(touching)
     {
-        wheel1.torque+=0.03;
-        wheel2.torque+=0.03;
+        player.body.setVelocityX(250);
 
-        if(Math.abs(bike.velocity.y)>2)
+        // flip while airborne
+        if(!player.body.touching.down)
         {
-            bike.torque-=0.08;
+            player.angle -= 4;
         }
-
-        createParticle();
     }
 
-    bikeG.x=bike.position.x;
-    bikeG.y=bike.position.y;
-    bikeG.rotation=bike.angle;
-
-    wheelG1.x=wheel1.position.x;
-    wheelG1.y=wheel1.position.y;
-
-    wheelG2.x=wheel2.position.x;
-    wheelG2.y=wheel2.position.y;
-
-    const score=
-        Math.floor(
-            bike.position.x/10
+    score =
+        Math.max(
+            score,
+            Math.floor(player.x / 10)
         );
 
     scoreText.setText(
-        "Score: "+score
+        "Score: " + score
     );
 
-    if(
-        bike.position.x >
-        nextTerrainX-4000
-    )
+    if(player.x > nextTerrainX - 3000)
     {
-        spawnTerrain(this.scene.scenes[0]);
-    }
-
-    updateParticles();
-}
-
-function createParticle()
-{
-    const p=
-        game.scene.scenes[0].add.circle(
-            wheel2.position.x,
-            wheel2.position.y,
-            4,
-            0xff00ff
+        spawnTerrain(this);
+        this.physics.add.collider(
+            player,
+            terrain[terrain.length-1]
         );
-
-    particles.push({
-        obj:p,
-        life:30
-    });
-}
-
-function updateParticles()
-{
-    for(let i=particles.length-1;i>=0;i--)
-    {
-        particles[i].life--;
-
-        particles[i].obj.alpha=
-            particles[i].life/30;
-
-        particles[i].obj.y+=1;
-
-        if(
-            particles[i].life<=0
-        )
-        {
-            particles[i].obj.destroy();
-            particles.splice(i,1);
-        }
     }
 }
 
