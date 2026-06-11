@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Neon Rider</title>
+<style>
+  :root { --cyan:#00f0ff; --purple:#b800ff; --pink:#ff2bd6; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: #000; color: #fff;
+    overflow: hidden; touch-action: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  #game { position: fixed; inset: 0; }
+  .overlay {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, rgba(20,0,40,0.85), rgba(0,0,0,0.95));
+    z-index: 10; pointer-events: auto;
+  }
+  .panel {
+    background: rgba(8,0,20,0.85);
+    border: 1px solid var(--cyan);
+    box-shadow: 0 0 24px var(--cyan), inset 0 0 24px rgba(0,240,255,0.15);
+    border-radius: 14px;
+    padding: 24px 28px;
+    max-width: 92vw; width: 380px;
+    text-align: center;
+  }
+  .panel h1 {
+    margin: 0 0 6px; font-size: 32px; letter-spacing: 2px;
+    color: var(--cyan); text-shadow: 0 0 10px var(--cyan), 0 0 24px var(--purple);
+  }
+  .panel h2 {
+    margin: 0 0 14px; font-size: 14px; color: var(--purple); letter-spacing: 3px;
+    text-shadow: 0 0 8px var(--purple);
+  }
+  .panel p { margin: 8px 0; font-size: 14px; color: #cfd; }
+  .panel .big { font-size: 36px; color: #fff; text-shadow: 0 0 12px var(--cyan); margin: 6px 0; }
+  .panel .best { font-size: 14px; color: var(--pink); text-shadow: 0 0 6px var(--pink); }
+  .panel button, .panel input {
+    font: inherit; font-size: 16px;
+    background: transparent; color: var(--cyan);
+    border: 1px solid var(--cyan);
+    border-radius: 8px; padding: 10px 14px; margin: 6px 4px;
+    text-shadow: 0 0 6px var(--cyan); box-shadow: 0 0 10px rgba(0,240,255,0.4);
+    cursor: pointer; outline: none;
+  }
+  .panel input { width: 60%; text-align: center; letter-spacing: 2px; text-transform: uppercase; }
+  .panel button:hover { background: rgba(0,240,255,0.1); }
+  .lb { text-align: left; margin: 12px auto 0; max-height: 220px; overflow-y: auto; }
+  .lb ol { padding-left: 28px; margin: 6px 0; }
+  .lb li { margin: 2px 0; font-size: 13px; color: #aef; }
+  .lb li b { color: var(--cyan); }
+  .hint { font-size: 12px; color: #88a; margin-top: 10px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="start" class="overlay">
+  <div class="panel">
+    <h1>NEON RIDER</h1>
+    <h2>HOLD TO RIDE</h2>
+    <p>Touch and hold anywhere to accelerate.</p>
+    <p>While airborne, hold to spin — land flips for bonus points.</p>
+    <p class="best" id="startBest">Best: 0</p>
+    <button id="playBtn">PLAY</button>
+    <button id="lbBtn">LEADERBOARD</button>
+    <p class="hint">Desktop: hold mouse or spacebar</p>
+  </div>
+</div>
+<div id="gameover" class="overlay hidden">
+  <div class="panel">
+    <h1>WIPEOUT</h1>
+    <h2>RUN OVER</h2>
+    <p>Score</p>
+    <div class="big" id="finalScore">0</div>
+    <p class="best" id="finalBest">Best: 0</p>
+    <div id="nameRow">
+      <p>Top 10! Enter a name:</p>
+      <input id="nameInput" maxlength="8" placeholder="YOU" />
+      <button id="saveBtn">SAVE</button>
+    </div>
+    <div>
+      <button id="againBtn">RIDE AGAIN</button>
+      <button id="lbBtn2">LEADERBOARD</button>
+    </div>
+  </div>
+</div>
+<div id="lboard" class="overlay hidden">
+  <div class="panel">
+    <h1>TOP 10</h1>
+    <h2>NEON RIDERS</h2>
+    <div class="lb"><ol id="lbList"></ol></div>
+    <button id="closeLb">BACK</button>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<script>
+/* =========================================================================
+   NEON RIDER — single-file Phaser 3 + Matter.js arcade ride game.
+   - Endless procedural terrain (rolling hills, ramps, big jumps)
+   - Procedural loop-of-segments structures
+   - Two-wheel matter bike with suspension constraints
+   - Touch / mouse / space: accelerate on ground, flip in air
+   - Flip detection, scoring, particles, local leaderboard
+   ========================================================================= */
+(() => {
+  // ---------------- Config ----------------
+  const W = () => window.innerWidth;
+  const H = () => window.innerHeight;
+  const LB_KEY = 'neonRiderLB_v1';
+  const BEST_KEY = 'neonRiderBest_v1';
+  const COLOR_CYAN   = 0x00f0ff;
+  const COLOR_PURPLE = 0xb800ff;
+  const COLOR_PINK   = 0xff2bd6;
+  // Terrain tuning
+  const SEG_LEN = 28;            // horizontal spacing between polyline points
+  const CHUNK_POINTS = 32;       // points generated per chunk
+  const AHEAD_DIST = 2200;       // generate this far ahead of player
+  const BEHIND_DIST = 900;       // cull bodies this far behind player
+  const LOOP_RADIUS = 130;
+  const LOOP_CHANCE = 0.22;      // per chunk
+  const RAMP_CHANCE = 0.35;      // per chunk
+  // Bike tuning
+  const WHEEL_R = 14;
+  const CHASSIS_W = 46;
+  const CHASSIS_H = 10;
+  const WHEEL_TORQUE_VEL = 22;   // angular velocity applied to wheels
+  const AIR_ROT_TORQUE = 0.012;  // chassis air rotation torque
+  const MAX_SPEED = 14;
+  // ---------------- Leaderboard ----------------
+  const getLB = () => {
+    try { return JSON.parse(localStorage.getItem(LB_KEY) || '[]'); }
+    catch { return []; }
+  };
+  const saveLB = (lb) => localStorage.setItem(LB_KEY, JSON.stringify(lb.slice(0, 10)));
+  const getBest = () => parseInt(localStorage.getItem(BEST_KEY) || '0', 10);
+  const setBest = (v) => localStorage.setItem(BEST_KEY, String(v));
+  // ---------------- UI ----------------
+  const $ = (id) => document.getElementById(id);
+  const showOverlay = (id) => $(id).classList.remove('hidden');
+  const hideOverlay = (id) => $(id).classList.add('hidden');
+  const renderLB = () => {
+    const lb = getLB();
+    $('lbList').innerHTML = lb.length
+      ? lb.map(e => `<li><b>${escapeHtml(e.name)}</b> — ${e.score}</li>`).join('')
+      : '<li>No scores yet — be the first.</li>';
+  };
+  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  $('startBest').textContent = 'Best: ' + getBest();
+  let scene = null;
+  $('playBtn').onclick = () => { hideOverlay('start'); startGame(); };
+  $('againBtn').onclick = () => { hideOverlay('gameover'); startGame(); };
+  $('lbBtn').onclick = () => { renderLB(); showOverlay('lboard'); };
+  $('lbBtn2').onclick = () => { renderLB(); showOverlay('lboard'); };
+  $('closeLb').onclick = () => {
+    hideOverlay('lboard');
+    if ($('gameover').classList.contains('hidden') && !scene) showOverlay('start');
+  };
+  $('saveBtn').onclick = () => {
+    const name = ($('nameInput').value || 'YOU').toUpperCase().slice(0, 8);
+    const score = parseInt($('finalScore').textContent, 10) || 0;
+    const lb = getLB();
+    lb.push({ name, score });
+    lb.sort((a, b) => b.score - a.score);
+    saveLB(lb);
+    $('nameRow').classList.add('hidden');
+    renderLB(); showOverlay('lboard');
+  };
+  // ====================== PHASER SCENE ======================
+  class RiderScene extends Phaser.Scene {
+    constructor() { super('rider'); }
+    create() {
+      scene = this;
+      this.matter.world.setGravity(0, 1.6);
+      // Disable default world bounds — we generate infinitely.
+      this.matter.world.setBounds(-1e6, -1e6, 2e6, 2e6, 0, false, false, false, false);
+      // --- Terrain state ---
+      this.points = [];           // polyline: [{x,y}]
+      this.terrainBodies = [];    // [{body, xMax}]
+      this.loopGroups = [];       // [{bodies:[], xMax}]
+      this.lastX = 0;
+      this.baseY = H() * 0.7;
+      this.lastY = this.baseY;
+      this.lastSlope = 0;
+      // Seed first flat strip
+      for (let i = 0; i < 16; i++) {
+        this.points.push({ x: i * SEG_LEN, y: this.baseY });
+      }
+      this.lastX = 15 * SEG_LEN;
+      // --- Graphics layers ---
+      this.terrainGfx = this.add.graphics();   // glow track
+      this.terrainGfx.setDepth(1);
+      // --- Bike ---
+      this.buildBike(80, this.baseY - 80);
+      // --- Particles (Phaser 3.60+ API) ---
+      this.trailGfx = this.add.graphics().setDepth(2);
+      this.trail = []; // {x,y,age,color}
+      // --- Camera ---
+      this.cameras.main.setBackgroundColor('#000010');
+      this.cameras.main.startFollow(this.chassis, false, 0.08, 0.08);
+      this.cameras.main.setLerp(0.08, 0.08);
+      this.cameras.main.setFollowOffset(-W() * 0.18, 60);
+      this.cameras.main.setZoom(this.computeZoom());
+      // --- Input ---
+      this.holding = false;
+      const press = () => { this.holding = true; };
+      const release = () => { this.holding = false; };
+      this.input.on('pointerdown', press);
+      this.input.on('pointerup', release);
+      this.input.on('pointerupoutside', release);
+      this.input.keyboard.on('keydown-SPACE', press);
+      this.input.keyboard.on('keyup-SPACE', release);
+      // Also listen on window to catch lost focus
+      window.addEventListener('blur', release);
+      window.addEventListener('touchend', release);
+      window.addEventListener('touchcancel', release);
+      // --- Score / flip tracking ---
+      this.startX = this.chassis.position.x;
+      this.score = 0;
+      this.flipBonus = 0;
+      this.airAngleAccum = 0;
+      this.lastChassisAngle = this.chassis.angle;
+      this.airborne = false;
+      this.airborneTime = 0;
+      this.dead = false;
+      this.scoreText = this.add.text(16, 14, '0 m', {
+        fontFamily: 'monospace', fontSize: '24px', color: '#00f0ff',
+        stroke: '#005570', strokeThickness: 2
+      }).setScrollFactor(0).setDepth(20).setShadow(0, 0, '#00f0ff', 10, true, true);
+      this.bestText = this.add.text(16, 44, 'BEST ' + getBest() + ' m', {
+        fontFamily: 'monospace', fontSize: '14px', color: '#ff2bd6'
+      }).setScrollFactor(0).setDepth(20).setShadow(0, 0, '#ff2bd6', 8, true, true);
+      this.flipText = this.add.text(W() / 2, H() * 0.25, '', {
+        fontFamily: 'monospace', fontSize: '36px', color: '#ffffff'
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(20)
+        .setShadow(0, 0, '#b800ff', 18, true, true);
+      // Initial generation
+      while (this.lastX < this.chassis.position.x + AHEAD_DIST) this.generateChunk();
+      this.rebuildTerrainGraphics();
+      // --- Collision: crash if chassis (or rider) hits terrain ---
+      this.matter.world.on('collisionstart', (e) => {
+        if (this.dead) return;
+        for (const pair of e.pairs) {
+          const a = pair.bodyA, b = pair.bodyB;
+          const involvesChassis = a === this.chassis || b === this.chassis;
+          if (!involvesChassis) continue;
+          const other = a === this.chassis ? b : a;
+          if (other.label === 'terrain') {
+            // Relative speed determines crash
+            const v = this.chassis.velocity;
+            const speed = Math.hypot(v.x, v.y);
+            if (speed > 2.2) this.crash();
+            else this.crash(); // any chassis-terrain contact is bad
+            return;
+          }
+        }
+      });
+      // resize
+      this.scale.on('resize', () => {
+        this.cameras.main.setFollowOffset(-W() * 0.18, 60);
+        this.cameras.main.setZoom(this.computeZoom());
+      });
+    }
+    computeZoom() {
+      // Slight zoom-out on small screens; tighter on desktop
+      const ref = 900;
+      return Math.max(0.55, Math.min(0.95, W() / ref * 0.85));
+    }
+    // ---------------- Bike construction ----------------
+    buildBike(x, y) {
+      const M = this.matter;
+      const group = M.world.nextGroup(true); // negative group: don't self-collide
+      this.chassis = M.add.rectangle(x, y, CHASSIS_W, CHASSIS_H, {
+        density: 0.0025, friction: 0.01, frictionAir: 0.005,
+        chamfer: { radius: 4 }, label: 'chassis',
+        collisionFilter: { group }
+      });
+      // small "rider torso" sensor on top — visually drawn but collides too
+      this.rider = M.add.rectangle(x, y - 14, 12, 18, {
+        density: 0.001, friction: 0.01, frictionAir: 0.01,
+        chamfer: { radius: 5 }, label: 'rider',
+        collisionFilter: { group }
+      });
+      M.add.constraint(this.chassis, this.rider, 14, 0.9, {
+        pointA: { x: 4, y: -2 }, pointB: { x: 0, y: 8 }
+      });
+      M.add.constraint(this.chassis, this.rider, 18, 0.9, {
+        pointA: { x: -6, y: -2 }, pointB: { x: 0, y: 8 }
+      });
+      this.wheelF = M.add.circle(x + 18, y + 10, WHEEL_R, {
+        density: 0.004, friction: 0.95, frictionStatic: 1.2,
+        restitution: 0.05, label: 'wheel',
+        collisionFilter: { group }
+      });
+      this.wheelR = M.add.circle(x - 18, y + 10, WHEEL_R, {
+        density: 0.004, friction: 0.95, frictionStatic: 1.2,
+        restitution: 0.05, label: 'wheel',
+        collisionFilter: { group }
+      });
+      // Suspension: two constraints per wheel for stability (soft springs)
+      const stiff = 0.35, damp = 0.18, len = 14;
+      M.add.constraint(this.chassis, this.wheelF, len, stiff, {
+        pointA: { x: 18, y: 4 }, damping: damp
+      });
+      M.add.constraint(this.chassis, this.wheelF, len, stiff, {
+        pointA: { x: 14, y: 4 }, damping: damp
+      });
+      M.add.constraint(this.chassis, this.wheelR, len, stiff, {
+        pointA: { x: -18, y: 4 }, damping: damp
+      });
+      M.add.constraint(this.chassis, this.wheelR, len, stiff, {
+        pointA: { x: -14, y: 4 }, damping: damp
+      });
+      // Visual: draw bike via a graphics object updated each frame
+      this.bikeGfx = this.add.graphics().setDepth(5);
+    }
+    // ---------------- Terrain generation ----------------
+    generateChunk() {
+      // Build a chunk of CHUNK_POINTS polyline points using layered sines.
+      const startX = this.lastX;
+      const startY = this.lastY;
+      // amplitude tuned for rolling hills + ramps
+      for (let i = 1; i <= CHUNK_POINTS; i++) {
+        const x = startX + i * SEG_LEN;
+        const t = x * 0.0042;
+        let y = this.baseY
+          + Math.sin(t) * 70
+          + Math.sin(t * 2.3 + 1.7) * 36
+          + Math.sin(t * 0.6 + 0.5) * 90;
+        // Keep within reasonable band
+        y = Math.max(H() * 0.35, Math.min(H() * 0.9, y));
+        this.points.push({ x, y });
+      }
+      this.lastX = this.points[this.points.length - 1].x;
+      this.lastY = this.points[this.points.length - 1].y;
+      // Build matter segments for the chunk we just added
+      this.buildTerrainSegments(this.points.length - CHUNK_POINTS - 1, this.points.length - 1);
+      // Maybe add a ramp (big upward kick) — done by inserting a short steep rise.
+      if (Math.random() < RAMP_CHANCE) this.appendRamp();
+      // Maybe add a loop structure (separate static bodies)
+      if (Math.random() < LOOP_CHANCE) this.appendLoop();
+    }
+    appendRamp() {
+      const startY = this.lastY;
+      const peakDy = -120 - Math.random() * 80;
+      const rampPts = 6;
+      for (let i = 1; i <= rampPts; i++) {
+        const x = this.lastX + i * SEG_LEN;
+        const k = i / rampPts;
+        // ease-in curve up
+        const y = startY + peakDy * (k * k);
+        this.points.push({ x, y });
+      }
+      const startIdx = this.points.length - rampPts - 1;
+      this.buildTerrainSegments(startIdx, this.points.length - 1);
+      this.lastX = this.points[this.points.length - 1].x;
+      this.lastY = this.points[this.points.length - 1].y;
+      // Followed by a drop (gap) for big air
+      const gapLen = 4 + Math.floor(Math.random() * 4);
+      const dropPts = [];
+      const dropTarget = this.baseY + 40;
+      for (let i = 1; i <= gapLen; i++) {
+        const x = this.lastX + i * SEG_LEN * 1.8;
+        const k = i / gapLen;
+        const y = this.lastY + (dropTarget - this.lastY) * k;
+        // ramp & landing only (skip middle for air gap is risky; keep continuous but lower)
+        dropPts.push({ x, y });
+      }
+      for (const p of dropPts) this.points.push(p);
+      this.buildTerrainSegments(this.points.length - gapLen - 1, this.points.length - 1);
+      this.lastX = this.points[this.points.length - 1].x;
+      this.lastY = this.points[this.points.length - 1].y;
+    }
+    appendLoop() {
+      // Loop center placed above ground; entry ramp leads bike onto right side.
+      const R = LOOP_RADIUS;
+      const Cx = this.lastX + R * 1.6;
+      const Cy = this.lastY - R;
+      // Build an entry ramp from current end up to right-bottom of loop (~angle 60° from bottom)
+      const entryAng = Math.PI / 2 - Math.PI / 5;  // 90° - 36° = 54°  (in our screen param)
+      const entry = {
+        x: Cx + R * Math.cos(entryAng),
+        y: Cy + R * Math.sin(entryAng)
+      };
+      // Smooth curve from (lastX,lastY) to entry
+      const rampPts = 8;
+      const sx = this.lastX, sy = this.lastY;
+      for (let i = 1; i <= rampPts; i++) {
+        const k = i / rampPts;
+        // Cubic ease
+        const e = k * k * (3 - 2 * k);
+        const x = sx + (entry.x - sx) * k;
+        const y = sy + (entry.y - sy) * e;
+        this.points.push({ x, y });
+      }
+      this.buildTerrainSegments(this.points.length - rampPts - 1, this.points.length - 1);
+      // Build the loop as ~32 static segments around full circle EXCEPT a gap from
+      // angle (π/2 - π/5) DOWN through (π/2 + π/5)  — bottom-right around bottom to bottom-left,
+      // i.e. exclude the bottom arc the bike enters/exits through.
+      const N = 36;
+      const gapStart = Math.PI / 2 - Math.PI / 5;  // ~54°
+      const gapEnd   = Math.PI / 2 + Math.PI / 5;  // ~126°  (these are screen params)
+      const loopBodies = [];
+      let prev = null;
+      for (let i = 0; i <= N; i++) {
+        const t = (i / N) * Math.PI * 2 - Math.PI / 2; // start at top, go around
+        // Normalize into [0, 2π)
+        let tn = t; while (tn < 0) tn += Math.PI * 2; while (tn >= Math.PI * 2) tn -= Math.PI * 2;
+        const inGap = tn > gapStart && tn < gapEnd;
+        const p = { x: Cx + R * Math.cos(t), y: Cy + R * Math.sin(t) };
+        if (prev && !inGap) {
+          const body = this.makeSegmentBody(prev.x, prev.y, p.x, p.y);
+          loopBodies.push(body);
+        }
+        prev = inGap ? null : p;
+      }
+      // Exit ramp from left-bottom of loop down to ground level continuation
+      const exitAng = Math.PI / 2 + Math.PI / 5;
+      const exit = {
+        x: Cx + R * Math.cos(exitAng),
+        y: Cy + R * Math.sin(exitAng)
+      };
+      const exitEnd = { x: exit.x + R * 1.4, y: this.baseY + (Math.random() - 0.5) * 40 };
+      const exitPts = 8;
+      for (let i = 1; i <= exitPts; i++) {
+        const k = i / exitPts;
+        const e = k * k * (3 - 2 * k);
+        const x = exit.x + (exitEnd.x - exit.x) * k;
+        const y = exit.y + (exitEnd.y - exit.y) * e;
+        this.points.push({ x, y });
+      }
+      this.buildTerrainSegments(this.points.length - exitPts - 1, this.points.length - 1);
+      this.lastX = this.points[this.points.length - 1].x;
+      this.lastY = this.points[this.points.length - 1].y;
+      this.loopGroups.push({ bodies: loopBodies, cx: Cx, cy: Cy, r: R, xMax: Cx + R });
+    }
+    makeSegmentBody(x1, y1, x2, y2) {
+      const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+      const dx = x2 - x1, dy = y2 - y1;
+      const len = Math.hypot(dx, dy);
+      const angle = Math.atan2(dy, dx);
+      const body = this.matter.add.rectangle(cx, cy, Math.max(len, 1), 6, {
+        isStatic: true, angle, friction: 0.95, frictionStatic: 1.2,
+        label: 'terrain'
+      });
+      return body;
+    }
+    buildTerrainSegments(fromIdx, toIdx) {
+      for (let i = Math.max(1, fromIdx); i <= toIdx; i++) {
+        const a = this.points[i - 1], b = this.points[i];
+        if (!a || !b) continue;
+        const body = this.makeSegmentBody(a.x, a.y, b.x, b.y);
+        this.terrainBodies.push({ body, xMax: b.x });
+      }
+    }
+    rebuildTerrainGraphics() {
+      const g = this.terrainGfx;
+      g.clear();
+      // Glow underlay (purple wide, cyan thin) on visible polyline only
+      const cam = this.cameras.main;
+      const left = cam.scrollX - 60;
+      const right = cam.scrollX + W() / cam.zoom + 60;
+      const pts = this.points;
+      // outer glow
+      g.lineStyle(10, COLOR_PURPLE, 0.25);
+      g.beginPath();
+      let started = false;
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        if (p.x < left || p.x > right) { started = false; continue; }
+        if (!started) { g.moveTo(p.x, p.y); started = true; }
+        else g.lineTo(p.x, p.y);
+      }
+      g.strokePath();
+      // mid glow
+      g.lineStyle(5, COLOR_CYAN, 0.55);
+      g.beginPath();
+      started = false;
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        if (p.x < left || p.x > right) { started = false; continue; }
+        if (!started) { g.moveTo(p.x, p.y); started = true; }
+        else g.lineTo(p.x, p.y);
+      }
+      g.strokePath();
+      // bright core
+      g.lineStyle(2, 0xffffff, 0.9);
+      g.beginPath();
+      started = false;
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        if (p.x < left || p.x > right) { started = false; continue; }
+        if (!started) { g.moveTo(p.x, p.y); started = true; }
+        else g.lineTo(p.x, p.y);
+      }
+      g.strokePath();
+      // Loops glow
+      for (const lp of this.loopGroups) {
+        if (lp.cx < left - 200 || lp.cx > right + 200) continue;
+        g.lineStyle(8, COLOR_PURPLE, 0.25);
+        g.strokeCircle(lp.cx, lp.cy, lp.r);
+        g.lineStyle(4, COLOR_CYAN, 0.6);
+        g.strokeCircle(lp.cx, lp.cy, lp.r);
+        g.lineStyle(1.5, 0xffffff, 0.9);
+        g.strokeCircle(lp.cx, lp.cy, lp.r);
+      }
+    }
+    // ---------------- Update ----------------
+    update(time, delta) {
+      if (this.dead) return;
+      const px = this.chassis.position.x;
+      // Generate more terrain ahead
+      while (this.lastX < px + AHEAD_DIST) this.generateChunk();
+      // Cull behind
+      this.cullBehind(px - BEHIND_DIST);
+      // Determine on-ground using wheel contact via small downward check.
+      const groundContact = this.wheelsTouching();
+      // Apply control
+      if (this.holding) {
+        if (groundContact) {
+          // Drive wheels forward
+          this.matter.body.setAngularVelocity(this.wheelR, WHEEL_TORQUE_VEL);
+          this.matter.body.setAngularVelocity(this.wheelF, WHEEL_TORQUE_VEL);
+          // Cap horizontal speed
+          if (this.chassis.velocity.x > MAX_SPEED) {
+            this.matter.body.setVelocity(this.chassis, { x: MAX_SPEED, y: this.chassis.velocity.y });
+          }
+        } else {
+          // Airborne: apply forward rotation torque (backflip = counter-clockwise visually = negative angle delta)
+          // Rider convention: bike rotates backward (top goes back). Apply negative angular acceleration.
+          this.chassis.torque += -AIR_ROT_TORQUE * this.chassis.mass * 1000;
+        }
+      }
+      // Flip detection
+      if (!groundContact) {
+        this.airborne = true;
+        this.airborneTime += delta;
+        let dA = this.chassis.angle - this.lastChassisAngle;
+        // wrap to [-π, π]
+        if (dA > Math.PI) dA -= Math.PI * 2;
+        if (dA < -Math.PI) dA += Math.PI * 2;
+        this.airAngleAccum += dA;
+      } else {
+        if (this.airborne) {
+          // Count completed full rotations (in either direction) on landing
+          const flips = Math.floor(Math.abs(this.airAngleAccum) / (Math.PI * 2));
+          if (flips > 0) {
+            const bonus = flips * 100;
+            this.flipBonus += bonus;
+            this.showFlipText(flips, bonus);
+          }
+        }
+        this.airborne = false;
+        this.airborneTime = 0;
+        this.airAngleAccum = 0;
+      }
+      this.lastChassisAngle = this.chassis.angle;
+      // Update score
+      const dist = Math.max(0, Math.floor((px - this.startX) / 10));
+      this.score = dist + this.flipBonus;
+      this.scoreText.setText(this.score + ' m');
+      // Trail particles from rear wheel
+      this.emitTrail(delta);
+      // Draw bike + trail
+      this.drawBike();
+      this.drawTrail(delta);
+      // Redraw terrain glow (cheap, screen-space-culled)
+      this.rebuildTerrainGraphics();
+      // Look-ahead camera offset based on velocity sign
+      const vx = this.chassis.velocity.x;
+      const targetOffsetX = -W() * (0.18 + Math.min(0.12, Math.max(0, vx) * 0.015));
+      const cam = this.cameras.main;
+      const cur = cam.followOffset;
+      cam.setFollowOffset(
+        Phaser.Math.Linear(cur.x, targetOffsetX, 0.05),
+        Phaser.Math.Linear(cur.y, 60, 0.05)
+      );
+      // Fell off the world? safety
+      if (this.chassis.position.y > H() * 2 + 800) this.crash();
+    }
+    wheelsTouching() {
+      // Check matter pairs for either wheel body touching a terrain body.
+      const pairs = this.matter.world.engine.pairs.list;
+      for (let i = 0; i < pairs.length; i++) {
+        const p = pairs[i];
+        if (!p.isActive) continue;
+        const a = p.bodyA, b = p.bodyB;
+        const isW = (x) => x === this.wheelF || x === this.wheelR;
+        const isT = (x) => x.label === 'terrain';
+        if ((isW(a) && isT(b)) || (isW(b) && isT(a))) return true;
+      }
+      return false;
+    }
+    showFlipText(flips, bonus) {
+      this.flipText.setText((flips > 1 ? flips + 'x FLIP! ' : 'FLIP! ') + '+' + bonus);
+      this.flipText.setAlpha(1).setScale(1);
+      this.tweens.add({
+        targets: this.flipText, alpha: 0, scale: 1.6, y: H() * 0.18,
+        duration: 900, ease: 'Cubic.easeOut',
+        onComplete: () => this.flipText.setY(H() * 0.25)
+      });
+    }
+    emitTrail(delta) {
+      const v = this.chassis.velocity;
+      const speed = Math.hypot(v.x, v.y);
+      if (speed < 1.2) return;
+      const count = Math.min(4, 1 + Math.floor(speed / 4));
+      for (let i = 0; i < count; i++) {
+        const wheel = i % 2 === 0 ? this.wheelR : this.wheelF;
+        this.trail.push({
+          x: wheel.position.x + (Math.random() - 0.5) * 4,
+          y: wheel.position.y + (Math.random() - 0.5) * 4,
+          age: 0,
+          life: 380 + Math.random() * 220,
+          color: Math.random() < 0.5 ? COLOR_CYAN : COLOR_PURPLE,
+          r: 2 + Math.random() * 2 + speed * 0.15
+        });
+      }
+      // High-speed extra sparks
+      if (speed > 8) {
+        this.trail.push({
+          x: this.chassis.position.x + (Math.random() - 0.5) * 30,
+          y: this.chassis.position.y + (Math.random() - 0.5) * 10,
+          age: 0, life: 260, color: COLOR_PINK, r: 1.5 + Math.random() * 2
+        });
+      }
+    }
+    drawTrail(delta) {
+      const g = this.trailGfx;
+      g.clear();
+      const alive = [];
+      for (const p of this.trail) {
+        p.age += delta;
+        if (p.age >= p.life) continue;
+        const a = 1 - p.age / p.life;
+        g.fillStyle(p.color, a * 0.8);
+        g.fillCircle(p.x, p.y, p.r * (0.4 + a * 0.6));
+        alive.push(p);
+      }
+      this.trail = alive.length > 600 ? alive.slice(alive.length - 600) : alive;
+    }
+    drawBike() {
+      const g = this.bikeGfx;
+      g.clear();
+      const c = this.chassis;
+      const wf = this.wheelF, wr = this.wheelR;
+      // Chassis bar (cyan glow)
+      const drawLine = (x1, y1, x2, y2, w, color, alpha) => {
+        g.lineStyle(w, color, alpha);
+        g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.strokePath();
+      };
+      drawLine(wr.position.x, wr.position.y, wf.position.x, wf.position.y, 8, COLOR_PURPLE, 0.4);
+      drawLine(wr.position.x, wr.position.y, wf.position.x, wf.position.y, 4, COLOR_CYAN, 0.95);
+      // Seat / rider stem
+      const cx = c.position.x, cy = c.position.y;
+      const ang = c.angle;
+      const upx = Math.sin(ang), upy = -Math.cos(ang);
+      drawLine(cx, cy, cx + upx * 18, cy + upy * 18, 6, COLOR_PURPLE, 0.4);
+      drawLine(cx, cy, cx + upx * 18, cy + upy * 18, 3, COLOR_CYAN, 1);
+      // Rider torso
+      const r = this.rider;
+      g.fillStyle(0x110022, 1);
+      g.fillCircle(r.position.x, r.position.y, 7);
+      g.lineStyle(2, COLOR_PINK, 1);
+      g.strokeCircle(r.position.x, r.position.y, 7);
+      // Wheels
+      for (const w of [wf, wr]) {
+        g.lineStyle(6, COLOR_PURPLE, 0.4);
+        g.strokeCircle(w.position.x, w.position.y, WHEEL_R + 2);
+        g.lineStyle(3, COLOR_CYAN, 1);
+        g.strokeCircle(w.position.x, w.position.y, WHEEL_R);
+        // spoke
+        const sa = w.angle;
+        g.lineStyle(1.5, 0xffffff, 0.9);
+        g.beginPath();
+        g.moveTo(w.position.x + Math.cos(sa) * WHEEL_R, w.position.y + Math.sin(sa) * WHEEL_R);
+        g.lineTo(w.position.x - Math.cos(sa) * WHEEL_R, w.position.y - Math.sin(sa) * WHEEL_R);
+        g.strokePath();
+      }
+    }
+    cullBehind(minX) {
+      // Remove polyline points behind (keep some buffer for graphics continuity)
+      while (this.points.length > 32 && this.points[0].x < minX - 200) this.points.shift();
+      // Remove terrain bodies whose right edge is behind minX
+      const keep = [];
+      for (const t of this.terrainBodies) {
+        if (t.xMax < minX) this.matter.world.remove(t.body);
+        else keep.push(t);
+      }
+      this.terrainBodies = keep;
+      const keepL = [];
+      for (const lp of this.loopGroups) {
+        if (lp.xMax < minX) {
+          for (const b of lp.bodies) this.matter.world.remove(b);
+        } else keepL.push(lp);
+      }
+      this.loopGroups = keepL;
+    }
+    crash() {
+      if (this.dead) return;
+      this.dead = true;
+      this.holding = false;
+      // Burst of pink particles
+      for (let i = 0; i < 60; i++) {
+        this.trail.push({
+          x: this.chassis.position.x + (Math.random() - 0.5) * 30,
+          y: this.chassis.position.y + (Math.random() - 0.5) * 20,
+          age: 0, life: 600 + Math.random() * 400,
+          color: i % 2 ? COLOR_PINK : COLOR_CYAN,
+          r: 3 + Math.random() * 3
+        });
+      }
+      this.cameras.main.shake(280, 0.012);
+      this.time.delayedCall(650, () => endGame(this.score));
+    }
+  }
+  // ====================== Game lifecycle ======================
+  let game = null;
+  function startGame() {
+    if (game) { game.destroy(true); game = null; scene = null; }
+    game = new Phaser.Game({
+      type: Phaser.AUTO,
+      parent: 'game',
+      backgroundColor: '#000000',
+      width: W(),
+      height: H(),
+      scale: {
+        mode: Phaser.Scale.RESIZE,
+        autoCenter: Phaser.Scale.CENTER_BOTH
+      },
+      physics: {
+        default: 'matter',
+        matter: { gravity: { y: 1.6 }, enableSleeping: false }
+      },
+      fps: { target: 60, forceSetTimeOut: false },
+      scene: [RiderScene]
+    });
+  }
+  function endGame(score) {
+    const best = getBest();
+    const newBest = Math.max(best, score);
+    if (score > best) setBest(score);
+    $('finalScore').textContent = String(score);
+    $('finalBest').textContent = 'Best: ' + newBest;
+    // Show name entry only if score qualifies for top 10
+    const lb = getLB();
+    const qualifies = score > 0 && (lb.length < 10 || score > (lb[lb.length - 1]?.score || 0));
+    $('nameRow').classList.toggle('hidden', !qualifies);
+    $('nameInput').value = '';
+    $('startBest').textContent = 'Best: ' + newBest;
+    showOverlay('gameover');
+    // Tear down phaser so a fresh scene restarts cleanly
+    if (game) { game.destroy(true); game = null; scene = null; }
+  }
+  // Auto-resize Phaser handled by Scale.RESIZE; no extra code needed.
+})();
+</script>
+</body>
+</html>
