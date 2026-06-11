@@ -1,17 +1,198 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Neon Rider</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Neon Rider Prototype</title>
 
-    <link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 
-    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<style>
+html,body{
+    margin:0;
+    padding:0;
+    overflow:hidden;
+    background:#000;
+}
+canvas{
+    display:block;
+}
+</style>
 </head>
 <body>
 
-<div id="game"></div>
+<script>
 
-<script src="game.js"></script>
+const config = {
+    type: Phaser.AUTO,
+    width: window.innerWidth,
+    height: window.innerHeight,
+
+    physics:{
+        default:'matter',
+        matter:{
+            gravity:{ y:1 },
+            debug:false
+        }
+    },
+
+    scene:{
+        create:create,
+        update:update
+    }
+};
+
+const game = new Phaser.Game(config);
+
+let bike;
+let frontWheel;
+let rearWheel;
+
+let bikeGraphic;
+let frontGraphic;
+let rearGraphic;
+
+let scoreText;
+
+let accelerating = false;
+
+function create()
+{
+    this.matter.world.setBounds(0,0,20000,3000);
+
+    // Ground
+    this.matter.add.rectangle(
+        10000,
+        900,
+        20000,
+        120,
+        {
+            isStatic:true
+        }
+    );
+
+    // Bike body
+    bike = this.matter.add.rectangle(
+        400,
+        500,
+        120,
+        30
+    );
+
+    // Wheels
+    frontWheel = this.matter.add.circle(
+        450,
+        550,
+        25
+    );
+
+    rearWheel = this.matter.add.circle(
+        350,
+        550,
+        25
+    );
+
+    // Constraints
+    this.matter.add.constraint(
+        bike,
+        frontWheel,
+        60,
+        0.9
+    );
+
+    this.matter.add.constraint(
+        bike,
+        rearWheel,
+        60,
+        0.9
+    );
+
+    // Graphics
+    bikeGraphic = this.add.rectangle(
+        0,0,
+        120,
+        30,
+        0xffffff
+    );
+
+    frontGraphic = this.add.circle(
+        0,0,
+        25,
+        0x00ffff
+    );
+
+    rearGraphic = this.add.circle(
+        0,0,
+        25,
+        0x00ffff
+    );
+
+    // Camera
+    this.cameras.main.startFollow(
+        bikeGraphic,
+        true,
+        0.08,
+        0.08
+    );
+
+    // Score
+    scoreText = this.add.text(
+        20,
+        20,
+        "Score: 0",
+        {
+            fontSize:"32px",
+            color:"#ffffff"
+        }
+    );
+
+    scoreText.setScrollFactor(0);
+
+    // Touch
+    this.input.on("pointerdown",()=>{
+        accelerating = true;
+    });
+
+    this.input.on("pointerup",()=>{
+        accelerating = false;
+    });
+}
+
+function update()
+{
+    if(accelerating)
+    {
+        frontWheel.torque += 0.03;
+        rearWheel.torque += 0.03;
+
+        // Flip in air
+        if(Math.abs(bike.velocity.y) > 2)
+        {
+            bike.torque -= 0.08;
+        }
+    }
+
+    bikeGraphic.x = bike.position.x;
+    bikeGraphic.y = bike.position.y;
+    bikeGraphic.rotation = bike.angle;
+
+    frontGraphic.x = frontWheel.position.x;
+    frontGraphic.y = frontWheel.position.y;
+
+    rearGraphic.x = rearWheel.position.x;
+    rearGraphic.y = rearWheel.position.y;
+
+    const score = Math.max(
+        0,
+        Math.floor(bike.position.x / 10)
+    );
+
+    scoreText.setText(
+        "Score: " + score
+    );
+}
+
+</script>
 
 </body>
 </html>
