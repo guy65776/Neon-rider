@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Neon Rider</title>
+<title>Neon Rider - Smooth Terrain</title>
 
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 
@@ -23,25 +23,35 @@ canvas{
 
 <script>
 
-let player;
+let bikeBody;
+let frontWheel;
+let rearWheel;
+
+let bikeRect;
+let frontCircle;
+let rearCircle;
+
 let scoreText;
 let score = 0;
 let touching = false;
-let terrain = [];
-let nextTerrainX = 0;
+
+const terrainPoints = [];
+let terrainGraphics;
 
 const config = {
     type: Phaser.AUTO,
     width: window.innerWidth,
     height: window.innerHeight,
     backgroundColor:"#000000",
+
     physics:{
-        default:"arcade",
-        arcade:{
-            gravity:{ y:1000 },
+        default:"matter",
+        matter:{
+            gravity:{ y:1 },
             debug:false
         }
     },
+
     scene:{
         create:create,
         update:update
@@ -54,123 +64,231 @@ function create()
 {
     const scene = this;
 
-    // Terrain
-    for(let i=0;i<25;i++)
-    {
-        spawnTerrain(scene);
-    }
+    terrainGraphics = this.add.graphics();
 
-    // Player bike (simple rectangle)
-    player = this.add.rectangle(
-        200,
-        300,
-        80,
-        30,
-        0xffffff
+    generateTerrain(scene);
+
+    bikeBody =
+        this.matter.add.rectangle(
+            250,
+            350,
+            120,
+            30
+        );
+
+    frontWheel =
+        this.matter.add.circle(
+            300,
+            390,
+            24
+        );
+
+    rearWheel =
+        this.matter.add.circle(
+            200,
+            390,
+            24
+        );
+
+    this.matter.add.constraint(
+        bikeBody,
+        frontWheel,
+        55,
+        0.9
     );
 
-    this.physics.add.existing(player);
-
-    player.body.setCollideWorldBounds(false);
-
-    terrain.forEach(t =>
-    {
-        this.physics.add.collider(player,t);
-    });
-
-    scoreText = this.add.text(
-        20,
-        20,
-        "Score: 0",
-        {
-            fontSize:"28px",
-            color:"#00ffff"
-        }
+    this.matter.add.constraint(
+        bikeBody,
+        rearWheel,
+        55,
+        0.9
     );
+
+    bikeRect =
+        this.add.rectangle(
+            0,0,120,30,0xffffff
+        );
+
+    bikeRect.setStrokeStyle(
+        4,
+        0xff00ff
+    );
+
+    frontCircle =
+        this.add.circle(
+            0,0,24,0x00ffff
+        );
+
+    rearCircle =
+        this.add.circle(
+            0,0,24,0x00ffff
+        );
+
+    scoreText =
+        this.add.text(
+            20,
+            20,
+            "Score: 0",
+            {
+                fontSize:"28px",
+                color:"#00ffff"
+            }
+        );
 
     scoreText.setScrollFactor(0);
 
-    this.input.on("pointerdown",()=>{
-        touching = true;
-    });
+    this.cameras.main.startFollow(
+        bikeRect,
+        true,
+        0.08,
+        0.08
+    );
 
-    this.input.on("pointerup",()=>{
-        touching = false;
-    });
+    this.input.on(
+        "pointerdown",
+        ()=> touching = true
+    );
 
-    this.cameras.main.startFollow(player,true,0.08,0.08);
+    this.input.on(
+        "pointerup",
+        ()=> touching = false
+    );
 }
 
-function spawnTerrain(scene)
+function generateTerrain(scene)
 {
-    const width =
-        Phaser.Math.Between(250,450);
+    let x = 0;
+    let y = 700;
 
-    const height = 40;
+    terrainPoints.push({x,y});
 
-    const y =
-        Phaser.Math.Between(600,800);
+    for(let i=0;i<300;i++)
+    {
+        x += 80;
 
-    const angle =
-        Phaser.Math.Between(-20,20);
-
-    const block =
-        scene.add.rectangle(
-            nextTerrainX,
-            y,
-            width,
-            height,
-            0x111111
+        y += Phaser.Math.Between(
+            -30,
+            30
         );
 
-    block.setStrokeStyle(
-        4,
+        y = Phaser.Math.Clamp(
+            y,
+            500,
+            850
+        );
+
+        terrainPoints.push({x,y});
+    }
+
+    terrainGraphics.clear();
+
+    terrainGraphics.lineStyle(
+        6,
         0x00ffff
     );
 
-    scene.physics.add.existing(
-        block,
-        true
+    terrainGraphics.beginPath();
+
+    terrainGraphics.moveTo(
+        terrainPoints[0].x,
+        terrainPoints[0].y
     );
 
-    block.angle = angle;
+    for(let i=1;i<terrainPoints.length;i++)
+    {
+        terrainGraphics.lineTo(
+            terrainPoints[i].x,
+            terrainPoints[i].y
+        );
+    }
 
-    terrain.push(block);
+    terrainGraphics.strokePath();
 
-    nextTerrainX += width;
+    for(let i=0;i<terrainPoints.length-1;i++)
+    {
+        const p1 = terrainPoints[i];
+        const p2 = terrainPoints[i+1];
+
+        const midX =
+            (p1.x+p2.x)/2;
+
+        const midY =
+            (p1.y+p2.y)/2;
+
+        const length =
+            Phaser.Math.Distance.Between(
+                p1.x,p1.y,
+                p2.x,p2.y
+            );
+
+        const angle =
+            Phaser.Math.Angle.Between(
+                p1.x,p1.y,
+                p2.x,p2.y
+            );
+
+        scene.matter.add.rectangle(
+            midX,
+            midY,
+            length,
+            12,
+            {
+                isStatic:true,
+                angle:angle
+            }
+        );
+    }
 }
 
 function update()
 {
     if(touching)
     {
-        player.body.setVelocityX(250);
+        frontWheel.torque += 0.03;
+        rearWheel.torque += 0.03;
 
-        // flip while airborne
-        if(!player.body.touching.down)
+        if(
+            Math.abs(
+                bikeBody.velocity.y
+            ) > 2
+        )
         {
-            player.angle -= 4;
+            bikeBody.torque -= 0.06;
         }
     }
+
+    bikeRect.x =
+        bikeBody.position.x;
+
+    bikeRect.y =
+        bikeBody.position.y;
+
+    bikeRect.rotation =
+        bikeBody.angle;
+
+    frontCircle.x =
+        frontWheel.position.x;
+
+    frontCircle.y =
+        frontWheel.position.y;
+
+    rearCircle.x =
+        rearWheel.position.x;
+
+    rearCircle.y =
+        rearWheel.position.y;
 
     score =
         Math.max(
             score,
-            Math.floor(player.x / 10)
+            Math.floor(
+                bikeBody.position.x/10
+            )
         );
 
     scoreText.setText(
-        "Score: " + score
+        "Score: "+score
     );
-
-    if(player.x > nextTerrainX - 3000)
-    {
-        spawnTerrain(this);
-        this.physics.add.collider(
-            player,
-            terrain[terrain.length-1]
-        );
-    }
 }
 
 </script>
