@@ -244,8 +244,8 @@ function update()
 {
     if(touching)
     {
-        frontWheel.torque += 0.03;
-        rearWheel.torque += 0.03;
+        frontWheel.torque += 0.8;
+        rearWheel.torque += 0.8;
 
         if(
             Math.abs(
@@ -253,7 +253,7 @@ function update()
             ) > 2
         )
         {
-            bikeBody.torque -= 0.06;
+            bikeBody.torque -= 0.8;
         }
     }
 
