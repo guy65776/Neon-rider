@@ -3,19 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Neon Rider Prototype</title>
+<title>Neon Rider Terrain Pack</title>
 
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 
 <style>
 html,body{
-    margin:0;
-    padding:0;
-    overflow:hidden;
-    background:#000;
+margin:0;
+padding:0;
+overflow:hidden;
+background:black;
 }
 canvas{
-    display:block;
+display:block;
 }
 </style>
 </head>
@@ -31,7 +31,7 @@ const config = {
     physics:{
         default:'matter',
         matter:{
-            gravity:{ y:1 },
+            gravity:{y:1},
             debug:false
         }
     },
@@ -42,154 +42,278 @@ const config = {
     }
 };
 
-const game = new Phaser.Game(config);
+new Phaser.Game(config);
 
 let bike;
-let frontWheel;
-let rearWheel;
+let wheel1;
+let wheel2;
 
-let bikeGraphic;
-let frontGraphic;
-let rearGraphic;
+let bikeG;
+let wheelG1;
+let wheelG2;
 
 let scoreText;
 
-let accelerating = false;
+let accelerating=false;
+
+let terrain=[];
+let nextTerrainX=0;
+
+let particles=[];
 
 function create()
 {
-    this.matter.world.setBounds(0,0,20000,3000);
-
-    // Ground
-    this.matter.add.rectangle(
-        10000,
-        900,
-        20000,
-        120,
-        {
-            isStatic:true
-        }
+    this.matter.world.setBounds(
+        -1000,
+        -1000,
+        500000,
+        5000
     );
 
-    // Bike body
-    bike = this.matter.add.rectangle(
-        400,
-        500,
-        120,
-        30
-    );
+    createTerrain(this);
 
-    // Wheels
-    frontWheel = this.matter.add.circle(
-        450,
-        550,
-        25
-    );
+    bike =
+        this.matter.add.rectangle(
+            300,
+            300,
+            120,
+            30
+        );
 
-    rearWheel = this.matter.add.circle(
-        350,
-        550,
-        25
-    );
+    wheel1 =
+        this.matter.add.circle(
+            250,
+            350,
+            25
+        );
 
-    // Constraints
+    wheel2 =
+        this.matter.add.circle(
+            350,
+            350,
+            25
+        );
+
     this.matter.add.constraint(
         bike,
-        frontWheel,
-        60,
+        wheel1,
+        70,
         0.9
     );
 
     this.matter.add.constraint(
         bike,
-        rearWheel,
-        60,
+        wheel2,
+        70,
         0.9
     );
 
-    // Graphics
-    bikeGraphic = this.add.rectangle(
-        0,0,
-        120,
-        30,
-        0xffffff
-    );
+    bikeG =
+        this.add.rectangle(
+            0,
+            0,
+            120,
+            30,
+            0xffffff
+        );
 
-    frontGraphic = this.add.circle(
-        0,0,
-        25,
-        0x00ffff
-    );
+    wheelG1 =
+        this.add.circle(
+            0,
+            0,
+            25,
+            0x00ffff
+        );
 
-    rearGraphic = this.add.circle(
-        0,0,
-        25,
-        0x00ffff
-    );
+    wheelG2 =
+        this.add.circle(
+            0,
+            0,
+            25,
+            0x00ffff
+        );
 
-    // Camera
-    this.cameras.main.startFollow(
-        bikeGraphic,
-        true,
-        0.08,
-        0.08
-    );
+    bikeG.setStrokeStyle(4,0xff00ff);
+    wheelG1.setStrokeStyle(4,0xff00ff);
+    wheelG2.setStrokeStyle(4,0xff00ff);
 
-    // Score
-    scoreText = this.add.text(
-        20,
-        20,
-        "Score: 0",
-        {
-            fontSize:"32px",
-            color:"#ffffff"
-        }
-    );
+    scoreText =
+        this.add.text(
+            20,
+            20,
+            "Score: 0",
+            {
+                fontSize:"32px",
+                color:"#00ffff"
+            }
+        );
 
     scoreText.setScrollFactor(0);
 
-    // Touch
-    this.input.on("pointerdown",()=>{
-        accelerating = true;
-    });
+    this.cameras.main.startFollow(
+        bikeG,
+        true,
+        0.05,
+        0.05
+    );
 
-    this.input.on("pointerup",()=>{
-        accelerating = false;
-    });
+    this.input.on(
+        "pointerdown",
+        ()=>accelerating=true
+    );
+
+    this.input.on(
+        "pointerup",
+        ()=>accelerating=false
+    );
+}
+
+function createTerrain(scene)
+{
+    for(let i=0;i<30;i++)
+    {
+        spawnTerrain(scene);
+    }
+}
+
+function spawnTerrain(scene)
+{
+    const width=
+        Phaser.Math.Between(
+            250,
+            500
+        );
+
+    const angle=
+        Phaser.Math.Between(
+            -25,
+            25
+        );
+
+    const y=
+        Phaser.Math.Between(
+            700,
+            900
+        );
+
+    const block=
+        scene.matter.add.rectangle(
+            nextTerrainX,
+            y,
+            width,
+            40,
+            {
+                isStatic:true,
+                angle:angle
+            }
+        );
+
+    terrain.push(block);
+
+    const visual=
+        scene.add.rectangle(
+            nextTerrainX,
+            y,
+            width,
+            40,
+            0x111111
+        );
+
+    visual.rotation=
+        Phaser.Math.DegToRad(
+            angle
+        );
+
+    visual.setStrokeStyle(
+        4,
+        0x00ffff
+    );
+
+    terrain.push(visual);
+
+    nextTerrainX+=width;
 }
 
 function update()
 {
     if(accelerating)
     {
-        frontWheel.torque += 0.03;
-        rearWheel.torque += 0.03;
+        wheel1.torque+=0.03;
+        wheel2.torque+=0.03;
 
-        // Flip in air
-        if(Math.abs(bike.velocity.y) > 2)
+        if(Math.abs(bike.velocity.y)>2)
         {
-            bike.torque -= 0.08;
+            bike.torque-=0.08;
         }
+
+        createParticle();
     }
 
-    bikeGraphic.x = bike.position.x;
-    bikeGraphic.y = bike.position.y;
-    bikeGraphic.rotation = bike.angle;
+    bikeG.x=bike.position.x;
+    bikeG.y=bike.position.y;
+    bikeG.rotation=bike.angle;
 
-    frontGraphic.x = frontWheel.position.x;
-    frontGraphic.y = frontWheel.position.y;
+    wheelG1.x=wheel1.position.x;
+    wheelG1.y=wheel1.position.y;
 
-    rearGraphic.x = rearWheel.position.x;
-    rearGraphic.y = rearWheel.position.y;
+    wheelG2.x=wheel2.position.x;
+    wheelG2.y=wheel2.position.y;
 
-    const score = Math.max(
-        0,
-        Math.floor(bike.position.x / 10)
-    );
+    const score=
+        Math.floor(
+            bike.position.x/10
+        );
 
     scoreText.setText(
-        "Score: " + score
+        "Score: "+score
     );
+
+    if(
+        bike.position.x >
+        nextTerrainX-4000
+    )
+    {
+        spawnTerrain(this.scene.scenes[0]);
+    }
+
+    updateParticles();
+}
+
+function createParticle()
+{
+    const p=
+        game.scene.scenes[0].add.circle(
+            wheel2.position.x,
+            wheel2.position.y,
+            4,
+            0xff00ff
+        );
+
+    particles.push({
+        obj:p,
+        life:30
+    });
+}
+
+function updateParticles()
+{
+    for(let i=particles.length-1;i>=0;i--)
+    {
+        particles[i].life--;
+
+        particles[i].obj.alpha=
+            particles[i].life/30;
+
+        particles[i].obj.y+=1;
+
+        if(
+            particles[i].life<=0
+        )
+        {
+            particles[i].obj.destroy();
+            particles.splice(i,1);
+        }
+    }
 }
 
 </script>
